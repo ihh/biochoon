@@ -30,7 +30,7 @@ const sineWave = (freq) => {
 };
 
 // attack, decay, length, release are in milliseconds
-const adsr = (attack, decay, sustain, release) => ((start, length) => {
+const adsr = (attack, decay, sustain, release) => ((length) => {
   const mslen = length * 1000;
   const amplAtEnd = (mslen < attack
                      ? (mslen / attack)
@@ -38,7 +38,7 @@ const adsr = (attack, decay, sustain, release) => ((start, length) => {
                         ? (1 - (1 - sustain) * ((mslen - attack) / decay))
                         : sustain));
   return (t) => {
-    const at = (t - start) * 1000;
+    const at = t * 1000;
     if (at < 0) return 0;
     const dt = at - attack, rt = at - mslen;
     return (rt > 0
@@ -55,22 +55,28 @@ const adsr = (attack, decay, sustain, release) => ((start, length) => {
   };
 });
 
-const decay = 500, env = adsr (200, 300, .6, decay);
+const attack = 200, decay = 300, release = 500, env = adsr (attack, decay, .6, release), len = attack + decay + release;
 
 const modulate = (wave1, wave2) => ((t) => wave1(t) * wave2(t));
 
-const makeFloats = (waveFunction) => new Array(samples).fill(0).map ((_x,n) => waveFunction (n / sampleRate));
+const makeFloats = (waveFunction) => new Array(samples).fill(0).map ((_x,n) => Math.max (-1, Math.min (1, waveFunction (n / sampleRate) || 0)));
 const makeSamples = (waveFunction) => makeFloats (waveFunction).map ((x) => Math.round (x * max));
 
-const beepPitch = 441, beep = sawtoothWave (beepPitch);
-const filename = 'beep.wav';
+const mix = (notes) => makeSamples ((t) => notes.reduce ((x, note) => ((t >= note.start && t < note.start + note.length)
+                                                                       ? (x + note.wave (t - note.start))
+                                                                       : x), 0));
 
-const beepEnv = env (0, secs - decay/1000);
-const beepSamples = makeSamples (modulate (beep, beepEnv));
+const a4Pitch = 440, e4Pitch = 330;
+const beepEnv = env (secs - release/1000);
+const notes = [{ start: 0, length: len, wave: modulate (sawtoothWave (a4Pitch), beepEnv) },
+               { start: .5, length: len, wave: modulate (sawtoothWave (e4Pitch), beepEnv) }];
+
+const beepSamples = mix (notes);
 //console.log(makeFloats(beep).map((x,n)=>(1000*n/sampleRate)+': '+x+"\n").join(''));
 //console.log(JSON.stringify(beepSamples));
 
 wav.fromScratch (1, sampleRate, depth, beepSamples);
-fs.writeFileSync(filename, wav.toBuffer());
 
+const filename = 'beep.wav';
+fs.writeFileSync (filename, wav.toBuffer());
 exec (player + ' ' + filename);
