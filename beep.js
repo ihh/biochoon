@@ -59,17 +59,21 @@ const attack = 200, decay = 300, release = 500, env = adsr (attack, decay, .6, r
 
 const modulate = (wave1, wave2) => ((t) => wave1(t) * wave2(t));
 
-const makeFloats = (waveFunction) => new Array(samples).fill(0).map ((_x,n) => Math.max (-1, Math.min (1, waveFunction (n / sampleRate) || 0)));
-const makeSamples = (waveFunction) => makeFloats (waveFunction).map ((x) => Math.round (x * max));
+const makeFloats = (waveFunction, nSamples) => {
+  console.warn (`Creating ${nSamples} samples`);
+  return new Array(nSamples).fill(0).map ((_x,n) => Math.max (-1, Math.min (1, waveFunction (n / sampleRate) || 0)));
+};
+const makeSamples = (waveFunction, nSamples) => makeFloats (waveFunction, nSamples).map ((x) => Math.round (x * max));
 
 const mix = (notes) => makeSamples ((t) => notes.reduce ((x, note) => ((t >= note.start && t < note.start + note.length)
                                                                        ? (x + note.wave (t - note.start))
-                                                                       : x), 0));
+                                                                       : x), 0),
+                                    notes.reduce ((maxLen, note) => Math.max (maxLen, note.start + note.length), 0) * sampleRate);
 
 const a4Pitch = 440, e4Pitch = 330;
 const beepEnv = env (secs - release/1000);
-const notes = [{ start: 0, length: len, wave: modulate (sawtoothWave (a4Pitch), beepEnv) },
-               { start: .5, length: len, wave: modulate (sawtoothWave (e4Pitch), beepEnv) }];
+const notes = [{ start: 0, length: len/1000, wave: modulate (sawtoothWave (a4Pitch), beepEnv) },
+               { start: .5, length: len/1000, wave: modulate (sawtoothWave (e4Pitch), beepEnv) }];
 
 const beepSamples = mix (notes);
 //console.log(makeFloats(beep).map((x,n)=>(1000*n/sampleRate)+': '+x+"\n").join(''));
