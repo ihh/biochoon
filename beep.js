@@ -9,25 +9,34 @@ let wav = new WaveFile();
 // Create a mono wave file, 44.1 kHz, 32-bit signed
 const sampleRate = 44100, samplePeriod = 1 / sampleRate;
 const depth = '32', max = 1 << 31;
-const secs = 1, millisecs = secs * 1000, samples = sampleRate * secs;
 
-// The actual frequency of the square wave function this generates is (sampleRate/period) where period=Math.round(sampleRate/freq)
-// This keeps the implementation simple for this little test
-const squareWave = (freq) => {
-  const period = Math.round (sampleRate / freq);
-  const halfPeriod = period / 2;
-  return (t) => (((Math.round (t * sampleRate) % period) > halfPeriod) ? +1 : -1);
+const halfPeriod = Math.PI, period = 2 * halfPeriod;
+const waveform = {
+  'square': (phase) => phase > halfPeriod ? +1 : -1,
+  'sawtooth': (phase) => 1 - (2 * phase / period),
+  'sine': (phase) => Math.sin (phase)
 };
 
-const sawtoothWave = (freq) => {
-  const period = Math.round (sampleRate / freq);
-  return (t) => 2 * (Math.round (t * sampleRate) % period) / period - 1;
+const freqMod = (wave, freqEnv) => {
+  let tLast = 0, phase = 0;
+  return (t) => {
+    if (t < tLast)
+      throw new Error ("Frequency-modulated function must be called monotonically")
+    if (t > tLast) {
+      const freq = freqEnv (t);
+      phase += period * freq * (t - tLast);
+      while (phase > period)
+        phase -= period;
+      tLast = t;
+    }
+    return wave (phase);
+  };
 };
 
-const sineWave = (freq) => {
-  const mul = 2 * Math.PI * freq;
-  return (t) => Math.sin (mul * t);
-};
+const fixedFreq = (wave, freq) => freqMod (wave, (t) => freq);
+
+const semitoneMultiplier = Math.pow (2, 1/12);
+const risingFreq = (wave, freq, semitonesPerSec) => freqMod (wave, (t) => freq * Math.pow (semitoneMultiplier, t * semitonesPerSec));
 
 // attack, decay, length, release are in milliseconds
 const adsr = (attack, decay, sustain, release) => ((length) => {
@@ -55,7 +64,7 @@ const adsr = (attack, decay, sustain, release) => ((length) => {
   };
 });
 
-const attack = 200, decay = 300, release = 500, env = adsr (attack, decay, .6, release), len = attack + decay + release;
+const attack = 200, decay = 300, release = 500, env = adsr (attack, decay, .6, release);
 
 const modulate = (wave1, wave2) => ((t) => wave1(t) * wave2(t));
 
@@ -68,12 +77,13 @@ const makeSamples = (waveFunction, nSamples) => makeFloats (waveFunction, nSampl
 const mix = (notes) => makeSamples ((t) => notes.reduce ((x, note) => ((t >= note.start && t < note.start + note.length)
                                                                        ? (x + note.wave (t - note.start))
                                                                        : x), 0),
-                                    notes.reduce ((maxLen, note) => Math.max (maxLen, note.start + note.length), 0) * sampleRate);
+                                    Math.ceil (notes.reduce ((maxLen, note) => Math.max (maxLen, note.start + note.length), 0) * sampleRate));
 
-const a4Pitch = 440, e4Pitch = 330;
-const beepEnv = env (secs - release/1000);
-const notes = [{ start: 0, length: len/1000, wave: modulate (sawtoothWave (a4Pitch), beepEnv) },
-               { start: .5, length: len/1000, wave: modulate (sawtoothWave (e4Pitch), beepEnv) }];
+const a4Pitch = 440, e4Pitch = 330, a3Pitch = 220;
+const lengthWithoutRelease = attack + decay*2, length = (lengthWithoutRelease + release) / 1000, beepEnv = env (lengthWithoutRelease);
+const notes = [{ start: 0, length, wave: modulate (fixedFreq (waveform.sine, a4Pitch), beepEnv) },
+               { start: .5, length, wave: modulate (fixedFreq (waveform.sawtooth, e4Pitch), beepEnv) },
+               { start: .75, length, wave: modulate (risingFreq (waveform.square, a3Pitch, 3 / length), beepEnv) }];
 
 const beepSamples = mix (notes);
 //console.log(makeFloats(beep).map((x,n)=>(1000*n/sampleRate)+': '+x+"\n").join(''));
